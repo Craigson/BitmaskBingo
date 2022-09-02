@@ -38,3 +38,34 @@ Tile Indices:
 4  3  2  1  0
 
 ```
+
+This means we can store all 25 of the `uint8` tile values in a single `uint256`. This new `storageContainer` has a total of 32 `buckets`, where each bucket is `8` bits in size ( `32 * 8 = 256` ). Because we only require 25 buckets to store our game board, we'll simply ignore the left-most 7 buckets. The layout in binary representation would look something like:
+
+```
+0000000011111111...00000000
+|__31__||__30__|   |___0__|
+```
+
+We can take the same approach to storing the hits/misses of the game board, represented as `0`s and `1`s, corresponding to the same bit indices ( read right-to-left ) as the bingo numbers. Because we require only 25 bits for this, we can store the hits in a `uint32`.
+
+```
+Eg.
+
+grid:
+0  0  0  0  1
+0  0  0  0  1
+0  0  0  0  1
+0  0  0  0  1
+0  0  0  0  1
+
+take the right-most 25 bits:
+0000000 | 00001 00001 00001 00001 00001
+|_ 7 _|   |____________ 25 ___________|
+
+represented in binary as:
+00000000000100001000010000100001
+
+which gives a decimal value of:
+uint32 column = 1082401;
+
+```

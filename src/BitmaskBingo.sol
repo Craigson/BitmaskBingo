@@ -26,9 +26,12 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             minimumTurnDuration: 5 minutes
         });
 
-    // private
     address private immutable owner;
-    address private immutable bingoToken;
+    address private immutable bingoToken; // ERC20
+
+    // keep track of the games and the players
+    mapping(bytes32 => Game) gameRegistry;
+    mapping(address => mapping(bytes32 => BingoCard)) playerRegistry;
 
     constructor(address _token) {
         owner = msg.sender;
@@ -53,10 +56,26 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             prizePool: uint64(joinFee),
             createdAt: uint64(block.timestamp)
         });
+
+        gameRegistry[gameId] = newGame;
+
+        uint256 playerNumbersForCard = createBingoCardForPlayer(
+            uint256(0),
+            blockhash(block.number - 1)
+        );
+
+        playerRegistry[msg.sender][gameId] = BingoCard({
+            numberStorage: playerNumbersForCard, // single uint32 that stores all the tile numbers
+            hitStorage: 4096 // uint32 ie 0000000|0000000000001000000000000 which has the middle tile (index 12) marked as "hit"
+        });
     }
 
     function joinGame(bytes32 _gameId) external {
         Game memory gameJoined = gameRegistry[_gameId];
+        require(
+            gameJoined.lastDrawnNumber == 999,
+            "joinGame: Game does not exist"
+        ); // TODO: test
 
         GlobalGameSettings memory settings = gameSettings;
         require(
@@ -67,5 +86,18 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
 
         uint256 joinFee = gameSettings.entryFee;
         IERC20(bingoToken).transferFrom(msg.sender, address(this), joinFee);
+
+        Game storage g = gameRegistry[_gameId];
+        g.prizePool += uint64(joinFee);
+
+        uint256 playerNumbersForCard = createBingoCardForPlayer(
+            uint256(0),
+            blockhash(block.number - 1)
+        );
+
+        playerRegistry[msg.sender][_gameId] = BingoCard({
+            numberStorage: playerNumbersForCard, // single uint32 that stores all the card numbers
+            hitStorage: 4096 // uint32 ie 0000000|0000000000001000000000000 which has the middle spot (index 12) marked as "hit"
+        });
     }
 }
