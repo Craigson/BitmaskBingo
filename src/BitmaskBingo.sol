@@ -100,4 +100,54 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             hitStorage: 4096 // uint32 ie 0000000|0000000000001000000000000 which has the middle spot (index 12) marked as "hit"
         });
     }
+
+    function drawNumber(bytes32 _gameId) external onlyPlayer(_gameId) {
+        Game memory game = gameRegistry[_gameId];
+        GlobalGameSettings memory settings = gameSettings;
+        require(
+            block.timestamp > game.createdAt + settings.minimumJoinDuration,
+            "drawNumber: player are still joining"
+        );
+        require(
+            block.timestamp > game.lastDrawnAt + settings.minimumTurnDuration,
+            "drawNumber: turn duration pending"
+        );
+
+        uint256 random = uint256(
+            keccak256(abi.encode(blockhash(block.number - 1)))
+        ) % 256; // should this be 255
+
+        game.lastDrawnNumber = uint64(random);
+        game.lastDrawnAt = uint64(block.timestamp);
+
+        gameRegistry[_gameId] = game;
+    }
+
+    function markNumberOnCard(bytes32 _gameId) external onlyPlayer(_gameId) {
+        // get player card
+        BingoCard memory playerCard = playerRegistry[msg.sender][_gameId];
+
+        // get latest number
+        Game memory game = gameRegistry[_gameId];
+        uint256 lastDrawnNumber = game.lastDrawnNumber;
+        uint256[] memory numbers = getNumbersArrayForCard(
+            playerCard.numberStorage
+        );
+        (bool hasNumber, uint32 location) = playerHasNumber(
+            numbers,
+            lastDrawnNumber
+        );
+        require(hasNumber, "Player's card does not have last drawn number");
+        uint32 playerCardHits = playerCard.hitStorage;
+
+        // update the hit bitmap
+        playerCardHits = StorageUtils.setBitValueByIndex(
+            playerCardHits,
+            location
+        );
+
+        playerCard.hitStorage = playerCardHits;
+
+        playerRegistry[msg.sender][_gameId] = playerCard;
+    }
 }

@@ -87,4 +87,43 @@ abstract contract GameMechanics {
         }
         return updatedCard;
     }
+
+    function getNumbersArrayForCard(uint256 _card)
+        internal
+        pure
+        returns (uint256[] memory)
+    {
+        uint256[] memory cardNumbers = new uint256[](25);
+        for (uint256 i; i < 25; ++i) {
+            cardNumbers[i] = StorageUtils.getBucketValueByIndex(_card, i);
+        }
+        return cardNumbers;
+    }
+
+    function playerHasNumber(uint256[] memory _playerNumbers, uint256 _target)
+        internal
+        pure
+        returns (bool, uint32)
+    {
+        for (uint256 i; i < _playerNumbers.length; ++i) {
+            if (_playerNumbers[i] == _target) {
+                return (true, uint32(i));
+            }
+        }
+
+        return (false, uint32(99));
+    }
+
+    function checkGameForPlayer(address _player, address[] memory _gamePlayers)
+        internal
+        pure
+        returns (bool)
+    {
+        for (uint256 i; i < _gamePlayers.length; ++i) {
+            if (_player == _gamePlayers[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
 }
