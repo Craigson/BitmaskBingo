@@ -36,7 +36,6 @@ abstract contract GameMechanics {
         uint64 prizePool;
         uint64 createdAt;
     }
-
     /*  
         
         In order to assess whether a player has 'Bingo', we apply
@@ -71,6 +70,26 @@ abstract contract GameMechanics {
                     or decimal:     1082401
     */
 
+    uint32[12] winningBingoMasks = [
+        1082401, //  x0: 00000000000100001000010000100001
+        2164802, //  x1: 00000000001000010000100001000010
+        4329604, //  x2: 00000000010000100001000010000100
+        8659208, //  x3: 00000000100001000010000100001000
+        17318416, //  x4: 00000001000010000100001000010000
+        31, //      y0: 00000000000000000000000000011111
+        992, //     y1: 00000000000000000000001111100000
+        31744, //   y2: 00000000000000000111110000000000
+        1015808, // y3: 00000000000011111000000000000000
+        32505856, // y4: 00000001111100000000000000000000
+        17043521, // d0: 00000001000001000001000001000001
+        1118480 // d1: 00000000000100010001000100010000
+    ];
+
+    /**
+     *   @dev   Pure function doesn't read from, or write to, storage, making it
+     *          very efficient. Only the value returned from the function is added
+     *          to storage.
+     */
     function createBingoCardForPlayer(uint256 _card, bytes32 _entropy)
         internal
         pure
@@ -88,16 +107,17 @@ abstract contract GameMechanics {
         return updatedCard;
     }
 
-    function getNumbersArrayForCard(uint256 _card)
+    function checkGameForPlayer(address _player, address[] memory _gamePlayers)
         internal
         pure
-        returns (uint256[] memory)
+        returns (bool)
     {
-        uint256[] memory cardNumbers = new uint256[](25);
-        for (uint256 i; i < 25; ++i) {
-            cardNumbers[i] = StorageUtils.getBucketValueByIndex(_card, i);
+        for (uint256 i; i < _gamePlayers.length; ++i) {
+            if (_player == _gamePlayers[i]) {
+                return true;
+            }
         }
-        return cardNumbers;
+        return false;
     }
 
     function playerHasNumber(uint256[] memory _playerNumbers, uint256 _target)
@@ -114,15 +134,72 @@ abstract contract GameMechanics {
         return (false, uint32(99));
     }
 
-    function checkGameForPlayer(address _player, address[] memory _gamePlayers)
+    /**
+     *  @dev    The array of integers returned will be in reverse order to how the bits
+     *          are accessed.  When stored in the integer, they are accessed from right-to-left,
+     *          but when they're converted to an integer array, they're read left-to-right. So the 5x5
+     *          card of the binary representation has the 0th index at the bottom right, and the 24th index
+     *          at the top left.  The decimal representation, ie. when rendering the number array, has
+     *          the 0th element appears top-left, and the 24th element appears bottom right.
+     */
+    function getNumbersArrayForCard(uint256 _card)
+        internal
+        pure
+        returns (uint256[] memory)
+    {
+        uint256[] memory cardNumbers = new uint256[](25);
+        for (uint256 i; i < 25; ++i) {
+            cardNumbers[i] = StorageUtils.getBucketValueByIndex(_card, i);
+        }
+        return cardNumbers;
+    }
+
+    // TODO: must must must test if this returns it in the wrong order
+    /**
+     *  @dev    Returns an array of binary integers (0 or 1) representing
+     *          the hit state by index.
+     *  @dev    The array of integers returned will be in reverse order to how the bits
+     *          are accessed.  When stored in the integer, they are accessed from right-to-left,
+     *          but when they're converted to an integer array, they're read left-to-right. So the 5x5
+     *          card of the binary representation has the 0th index at the bottom right, and the 24th index
+     *          at the top left.  The decimal representation, ie. when rendering the number array, has
+     *          the 0th element appears top-left, and the 24th element appears bottom right.
+     */
+    function getHitsArrayForCard(uint32 _hits)
+        internal
+        pure
+        returns (uint256[] memory)
+    {
+        uint256[] memory cardHits = new uint256[](25);
+        for (uint32 i; i < 25; ++i) {
+            cardHits[i] = StorageUtils.getBitValueByIndex(_hits, i);
+        }
+        return cardHits;
+    }
+
+    function checkCardForHit(uint256[] memory _playerIds, uint256 _target)
         internal
         pure
         returns (bool)
     {
-        for (uint256 i; i < _gamePlayers.length; ++i) {
-            if (_player == _gamePlayers[i]) {
-                return true;
-            }
+        for (uint256 i; i < _playerIds.length; ++i) {
+            if (_playerIds[i] == _target) return true;
+        }
+
+        return false;
+    }
+
+    // note: if the bitwise AND ( & ) between the players grid and the mask
+    // is equal to the mask itself, then all the mask values must be present
+    // meaning that the players grid contains a winning combination
+    function checkForBingo(uint32[12] memory _hitMasks, uint32 _playerHits)
+        internal
+        pure
+        returns (bool)
+    {
+        for (uint256 i; i < _hitMasks.length; ++i) {
+            uint32 result = _playerHits & _hitMasks[i];
+            if (result == _hitMasks[i]) return true;
         }
         return false;
     }

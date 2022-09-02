@@ -21,9 +21,15 @@ contract BitmaskBingoTest is Test {
     address playerOne = address(99);
     address playerTwo = address(100);
     address playerThree = address(101);
+    address playerWithoutFunds = address(102);
+
+    address[] multiWinners;
 
     // game data
     uint256 initialEntryFee = 1000;
+
+    // we cannot access event data, so store a reference to games for testing purposes
+    mapping(address => bytes32) playerToCreatedGameIds;
 
     constructor() {
         // deploy the token
@@ -44,14 +50,28 @@ contract BitmaskBingoTest is Test {
 
     // ================================ A D M I N  T E S T S
 
-    // TODO: add more settings tests
     function test_updateGameSettings_asAdmin() public {
-        bingoGameContract.updateEntryFee(initialEntryFee * 2);
-        (uint256 updatedFee, , ) = bingoGameContract.getGameSettings();
-        assertEq(updatedFee, initialEntryFee * 2);
+        uint256 newEntryFee = initialEntryFee * 2;
+        uint256 newJoinDuration = 2 hours;
+        uint256 newTurnDuration = 10 minutes;
+        bingoGameContract.updateEntryFee(newEntryFee);
+        bingoGameContract.updateJoinDuration(newJoinDuration);
+        bingoGameContract.updateUpdateTurnDuration(newTurnDuration);
+
+        (
+            uint256 updatedFee,
+            uint256 updatedTurnDuration,
+            uint256 updatedJoinDuration
+        ) = bingoGameContract.getGameSettings();
+
+        assertEq(updatedFee, newEntryFee);
+        assertEq(newJoinDuration, updatedJoinDuration);
+        assertEq(newTurnDuration, updatedTurnDuration);
     }
 
     // ================================ C R E A T E  G A M E
+
+    // test creating a game by a player with sufficient funds for the entry fee
     function test_createGame_asPlayerOne() public {
         vm.startPrank(playerOne);
 
@@ -65,28 +85,8 @@ contract BitmaskBingoTest is Test {
         bytes32 gameId = bingoGameContract.createGame();
         playerToCreatedGameIds[playerOne] = gameId;
 
-        // TODO: check for emit
         emit log_named_bytes32("Game ID", gameId);
         vm.stopPrank();
-    }
-
-    // ================================ J O I N  G A M E
-
-    function testFail_joinGameEarly_asPlayerTwo() public {
-        // get the game ID created by the other player
-        bytes32 gameIdToJoin = playerToCreatedGameIds[playerOne];
-        emit log_named_bytes32("game id to join: ", gameIdToJoin);
-        // TODO: get joinFee from contract
-
-        vm.startPrank(playerTwo);
-
-        bool success = token.approve(
-            address(bingoGameContract),
-            initialEntryFee
-        );
-        assertTrue(success);
-
-        bingoGameContract.joinGame(gameIdToJoin);
     }
 
     // test creating a game without sufficient funds for entry fee
@@ -104,6 +104,7 @@ contract BitmaskBingoTest is Test {
         vm.stopPrank();
     }
 
+    // test single player creating multiple concurrent games
     function test_createMultipleGames_asPlayerOne() public {
         vm.startPrank(playerOne);
 
@@ -129,6 +130,9 @@ contract BitmaskBingoTest is Test {
         vm.stopPrank();
     }
 
+    // ================================ J O I N  G A M E
+
+    // test joining a game, user token balance decreasing, and prize pool balance increasing
     function test_joinGame_asPlayerTwo() public {
         // advance the block number to ensure different bingo card
         vm.warp(block.timestamp + 2 hours);
@@ -152,7 +156,6 @@ contract BitmaskBingoTest is Test {
         (, , uint256 prizePoolAfter, ) = bingoGameContract.getGameById(
             gameIdToJoin
         );
-        // TODO: expect Transfer
 
         vm.stopPrank();
 
@@ -166,6 +169,124 @@ contract BitmaskBingoTest is Test {
         assertEq(prizePoolBefore + initialEntryFee, prizePoolAfter);
     }
 
+    // test joining a game after the join period has expired
+    function testFail_joinGameLate_asPlayerThree() public {
+        vm.warp(block.timestamp + 2 hours);
+        // get the game ID created by the other player
+        bytes32 gameIdToJoin = playerToCreatedGameIds[playerOne];
+        emit log_named_bytes32("game id to join: ", gameIdToJoin);
+
+        vm.startPrank(playerThree);
+
+        bool success = token.approve(
+            address(bingoGameContract),
+            initialEntryFee
+        );
+        assertTrue(success);
+
+        bingoGameContract.joinGame(gameIdToJoin);
+    }
+
+    // test joining a game that doesn't exist
+    function testFail_joinNonExistingGame_asPlayerOne() public {
+        bytes32 nonExistentId = keccak256(abi.encode(playerOne));
+
+        vm.startPrank(playerOne);
+        bingoGameContract.joinGame(nonExistentId);
+    }
+
+    // ================================ P L A Y I N G  A  G A M E
+
+    // test a complete game between two players
+    function test_playGame_asTwoPlayers() public {
+        // create a game
+        bytes32 id = playerCreateGame(playerOne);
+        vm.roll(block.number + 1);
+
+        // join the game
+        playerJoinGame(id, playerTwo);
+
+        uint256[] memory playerOneCardNumbers = bingoGameContract
+            .getPlayerCardNumbersForGame(playerOne, id);
+        uint256[] memory playerTwoCardNumbers = bingoGameContract
+            .getPlayerCardNumbersForGame(playerTwo, id);
+
+        vm.warp(block.timestamp + 65 minutes);
+
+        bool hasWinner;
+        uint256 iterations;
+        address winner;
+
+        // reasoanble to assume that within 500 turns one of the players will get Bingo
+        for (uint256 i; i < 500; ++i) {
+            // alternate between players picking a card
+            address playerToDraw = i % 2 == 0 ? playerOne : playerTwo;
+            vm.prank(playerToDraw);
+            bingoGameContract.drawNumber(id);
+            uint256 latest = bingoGameContract.getLastDrawnNumberForGame(id);
+            emit log_named_uint("latset: ", latest);
+
+            // player one
+            vm.startPrank(playerOne);
+
+            bool shouldClaimOne = playerHasNumber(playerOneCardNumbers, latest);
+            if (shouldClaimOne) {
+                emit log_named_uint("uint to claim: ", latest);
+                emit log_string("ITS CLAIM TIME");
+                bingoGameContract.markNumberOnCard(id);
+                hasWinner = bingoGameContract.checkForWinner(playerOne, id);
+
+                if (hasWinner) {
+                    emit log_string("Player One wins!");
+                    iterations = i;
+                    winner = playerOne;
+                    break;
+                }
+            }
+            vm.stopPrank();
+
+            // player two
+            vm.startPrank(playerTwo);
+
+            bool shouldClaimTwo = playerHasNumber(playerTwoCardNumbers, latest);
+            if (shouldClaimTwo) {
+                emit log_named_uint("uint to claim: ", latest);
+                emit log_string("ITS CLAIM TIME");
+                bingoGameContract.markNumberOnCard(id);
+                hasWinner = bingoGameContract.checkForWinner(playerTwo, id);
+                if (hasWinner) {
+                    emit log_string("Player Two wins!");
+                    iterations = i;
+                    winner = playerTwo;
+                    break;
+                }
+            }
+            vm.stopPrank();
+            vm.warp(block.timestamp + 7 minutes);
+            vm.roll(block.timestamp + 1);
+        }
+
+        if (!hasWinner)
+            revert(
+                "Could not find a winner: try increasing iterations of loop"
+            );
+
+        (, , uint256 gamePrizeBefore, ) = bingoGameContract.getGameById(id);
+
+        uint256 winnerBalanceBeforeClaiming = token.balanceOf(winner);
+        bool success = bingoGameContract.claimPrize(id);
+        uint256 winnerBalanceAfterClaiming = token.balanceOf(winner);
+        (, , uint256 gamePrizeAfter, ) = bingoGameContract.getGameById(id);
+        assertEq(
+            winnerBalanceAfterClaiming,
+            winnerBalanceBeforeClaiming + gamePrizeBefore
+        );
+        assertEq(gamePrizeAfter, 0);
+    }
+
+    // ================================= H E L P E R S
+
+    // convenience function to create a game
     function playerCreateGame(address player) internal returns (bytes32) {
         vm.startPrank(player);
 
@@ -177,10 +298,10 @@ contract BitmaskBingoTest is Test {
         assertTrue(success);
 
         bytes32 gameId = bingoGameContract.createGame();
+        vm.expectEmit(true, true, false, false);
+
         playerToCreatedGameIds[player] = gameId;
 
-        // TODO: check for emit
-        emit log_named_bytes32("Game ID", gameId);
         vm.stopPrank();
 
         return gameId;

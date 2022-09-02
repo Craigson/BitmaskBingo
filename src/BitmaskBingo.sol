@@ -4,20 +4,12 @@ pragma solidity 0.8.15;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "./interfaces/IBitmaskBingo.sol";
+import "./GameMechanics.sol";
 
 contract BitmaskBingo is GameMechanics, IBitmaskBingo {
-    struct Game {
-        uint64 lastDrawnNumber; // last drawn number - waiting: 99, drawing: 0-255, finished: 1000
-        uint64 lastDrawnAt; // time of last drawn number
-        uint64 prizePool; // supply of tokens in the prizepool
-        uint64 createdAt; // time game was created
-    }
-
-    struct GlobalGameSettings {
-        uint256 entryFee;
-        uint256 minimumTurnDuration;
-        uint256 minimumJoinDuration;
-    }
+    // private
+    address private immutable owner;
+    address private immutable bingoToken;
 
     GlobalGameSettings gameSettings =
         GlobalGameSettings({
@@ -26,28 +18,33 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             minimumTurnDuration: 5 minutes
         });
 
-    address private immutable owner;
-    address private immutable bingoToken; // ERC20
-
-    // keep track of the games and the players
+    // keep track of the players and the game
     mapping(bytes32 => Game) gameRegistry;
     mapping(address => mapping(bytes32 => BingoCard)) playerRegistry;
+
+    // TODO: delete these
+    event LogUint256(uint256 val);
+    event LogUint32(uint32 val);
+    event LogString(string str);
 
     constructor(address _token) {
         owner = msg.sender;
         bingoToken = _token;
     }
 
+    // ================================ P L A Y E R  F U N C T I O N S
+
     function createGame() external returns (bytes32 gameId) {
         GlobalGameSettings memory settings = gameSettings;
         uint256 joinFee = settings.entryFee;
         emit LogUint256(joinFee);
 
-        // TODO: check, effects interaction?
+        // this will revert if balances are not sufficient
         IERC20(bingoToken).transferFrom(msg.sender, address(this), joinFee);
 
-        // generate a uuid for the game
+        // generate a uuid for the game and check that it doesn't already exist so we cannot overwrite
         gameId = keccak256(abi.encode(blockhash(block.number - 1), msg.sender));
+        require(gameRegistry[gameId].createdAt == 0, "Duplicate Game ID");
 
         // create the game
         Game memory newGame = Game({
@@ -57,6 +54,7 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             createdAt: uint64(block.timestamp)
         });
 
+        // store the game
         gameRegistry[gameId] = newGame;
 
         uint256 playerNumbersForCard = createBingoCardForPlayer(
@@ -64,20 +62,32 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             blockhash(block.number - 1)
         );
 
+        // store the player's game card
         playerRegistry[msg.sender][gameId] = BingoCard({
             numberStorage: playerNumbersForCard, // single uint32 that stores all the tile numbers
             hitStorage: 4096 // uint32 ie 0000000|0000000000001000000000000 which has the middle tile (index 12) marked as "hit"
         });
+
+        emit GameCreated(
+            msg.sender,
+            gameId,
+            playerNumbersForCard,
+            block.timestamp
+        );
     }
 
+    /**
+     * @dev  No need to check the player's token balance or allowance,
+     *       `transferFrom` will revert if either are insufficient.
+     */
     function joinGame(bytes32 _gameId) external {
         Game memory gameJoined = gameRegistry[_gameId];
-        require(
-            gameJoined.lastDrawnNumber == 999,
-            "joinGame: Game does not exist"
-        ); // TODO: test
+
+        // game exists
+        require(gameJoined.createdAt > 0, "joinGame: Game does not exist");
 
         GlobalGameSettings memory settings = gameSettings;
+        // player can't rejoin the game to reset their card once the game has started
         require(
             block.timestamp <
                 gameJoined.createdAt + settings.minimumJoinDuration,
@@ -99,8 +109,13 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             numberStorage: playerNumbersForCard, // single uint32 that stores all the card numbers
             hitStorage: 4096 // uint32 ie 0000000|0000000000001000000000000 which has the middle spot (index 12) marked as "hit"
         });
+
+        emit PlayerJoined(_gameId, msg.sender, playerNumbersForCard);
     }
 
+    /**
+     *   @dev    Can be drawn by any player in a game, but they bare the gas costs.
+     */
     function drawNumber(bytes32 _gameId) external onlyPlayer(_gameId) {
         Game memory game = gameRegistry[_gameId];
         GlobalGameSettings memory settings = gameSettings;
@@ -121,6 +136,8 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         game.lastDrawnAt = uint64(block.timestamp);
 
         gameRegistry[_gameId] = game;
+
+        emit GameNumberDrawn(_gameId, msg.sender, random);
     }
 
     function markNumberOnCard(bytes32 _gameId) external onlyPlayer(_gameId) {
@@ -149,5 +166,187 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         playerCard.hitStorage = playerCardHits;
 
         playerRegistry[msg.sender][_gameId] = playerCard;
+
+        emit PlayerHitRecorded(msg.sender, _gameId, lastDrawnNumber, location);
+    }
+
+    function claimPrize(bytes32 _gameId)
+        external
+        onlyPlayer(_gameId)
+        returns (bool success)
+    {
+        // confirm winner
+        BingoCard memory playerCard = playerRegistry[msg.sender][_gameId];
+        uint32 playerHits = playerCard.hitStorage;
+        uint32[12] memory bingoHitMasks = winningBingoMasks;
+        bool isWinner = checkForBingo(bingoHitMasks, playerHits);
+        require(isWinner, "Player is not a winner");
+
+        // mark as game completed
+        Game memory game = gameRegistry[_gameId];
+        uint256 prize = game.prizePool;
+        game.lastDrawnNumber = 1000; // `1000` indicates that the game is finished
+        game.prizePool = 0;
+        gameRegistry[_gameId] = game;
+
+        // transfer prize
+        IERC20(bingoToken).approve(address(this), prize);
+        IERC20(bingoToken).transferFrom(address(this), msg.sender, prize);
+
+        success = true;
+        emit GameEnded(_gameId, block.timestamp);
+        emit Bingo(_gameId, msg.sender, prize);
+    }
+
+    // ================================ C O N V E N I E N C E  F U N C T I O N S
+
+    function getGameSettings()
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256
+        )
+    {
+        return (
+            gameSettings.entryFee,
+            gameSettings.minimumTurnDuration,
+            gameSettings.minimumJoinDuration
+        );
+    }
+
+    function getGameById(bytes32 _gameId)
+        external
+        view
+        returns (
+            uint256 lastDrawn,
+            uint256 lastDrawnAt,
+            uint256 prizepool,
+            uint256 createdAt
+        )
+    {
+        Game memory game = gameRegistry[_gameId];
+        require(game.createdAt > 0, "Game does not exist");
+        lastDrawn = game.lastDrawnNumber;
+        lastDrawnAt = game.lastDrawnAt;
+        prizepool = game.prizePool;
+        createdAt = game.createdAt;
+    }
+
+    // convenience function for getting players numbers on their card
+    function getPlayerCardNumbersForGame(address _player, bytes32 _gameId)
+        external
+        view
+        returns (uint256[] memory)
+    {
+        BingoCard memory playerCard = playerRegistry[_player][_gameId];
+        uint256[] memory boardnumberStorage = new uint256[](25);
+        for (uint256 i; i < 25; ++i) {
+            boardnumberStorage[i] = StorageUtils.getBucketValueByIndex(
+                playerCard.numberStorage,
+                i
+            );
+        }
+        return boardnumberStorage;
+    }
+
+    // TODO: maybe return which line is the winner
+    function checkForWinner(address _player, bytes32 _gameId)
+        external
+        view
+        returns (bool weGotAWinner)
+    {
+        BingoCard memory playerCard = playerRegistry[_player][_gameId];
+        uint32[12] memory masks = winningBingoMasks;
+        uint32 playerHits = playerCard.hitStorage;
+
+        weGotAWinner = checkForBingo(masks, playerHits);
+    }
+
+    function getLastDrawnNumberForGame(bytes32 _gameId)
+        external
+        view
+        returns (uint256 latest)
+    {
+        return gameRegistry[_gameId].lastDrawnNumber;
+    }
+
+    /**
+     *  @dev    Converts the storage integers and returns two separate arrays,
+     *          one containing the numbers and the other their corresponding state (hit).
+     *  @dev    For each array of integers returned, they will be in reverse order to how the bits
+     *          are accessed and stored.  When stored as bits in the single uint, they are accessed from right-to-left,
+     *          but when they're converted to an array of integers, they're read left-to-right. So the 5x5
+     *          card of the binary representation has the 0th index at the bottom right, and the 24th index
+     *          at the top left.  The decimal representation, ie. rendering the bingo card in the front-end, has
+     *          the 0th element at the top-left, and the 24th element appears bottom right.
+     */
+    function getPlayerBingoCardForGame(address _player, bytes32 _gameId)
+        external
+        view
+        returns (
+            uint256[] memory cardNumbers,
+            uint256[] memory cardHits,
+            uint256 numberStorage, // return for reference
+            uint32 hitStorage // return for reference
+        )
+    {
+        BingoCard memory playerCard = playerRegistry[_player][_gameId];
+
+        numberStorage = playerCard.numberStorage;
+        hitStorage = playerCard.hitStorage;
+
+        cardNumbers = getNumbersArrayForCard(numberStorage);
+        cardHits = getHitsArrayForCard(hitStorage);
+    }
+
+    function checkGameHasPlayer(address _player, bytes32 _gameId)
+        external
+        view
+        returns (bool isPlayer)
+    {
+        BingoCard memory playerCard = playerRegistry[_player][_gameId];
+        isPlayer = playerCard.hitStorage > 0;
+    }
+
+    // ================================ A D M I N  F U N C T I O N S
+
+    // TODO: test this
+    function updateEntryFee(uint256 _fee) external onlyOwner {
+        gameSettings.entryFee = _fee;
+    }
+
+    function updateJoinDuration(uint256 _joinDuration) external onlyOwner {
+        gameSettings.minimumJoinDuration = _joinDuration;
+    }
+
+    function updateUpdateTurnDuration(uint256 _turnDuration)
+        external
+        onlyOwner
+    {
+        gameSettings.minimumTurnDuration = _turnDuration;
+    }
+
+    // ================================ M O D I F I E R S
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "!owner");
+        _;
+    }
+
+    /**
+     *   @dev   checks that the game exists, that it has not ended, and
+     *          that the player is a member.
+     */
+    modifier onlyPlayer(bytes32 _gameId) {
+        Game memory game = gameRegistry[_gameId];
+        require(game.createdAt > 0, "Game does not exist");
+        require(game.lastDrawnNumber != 1000, "Game is over"); // TODO: test this
+
+        BingoCard memory playerCard = playerRegistry[msg.sender][_gameId];
+        bool playerIsMember = playerCard.numberStorage > 0;
+        require(playerIsMember, "Not a member of this game");
+        _;
     }
 }
