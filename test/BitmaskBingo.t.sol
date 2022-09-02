@@ -99,7 +99,7 @@ contract BitmaskBingoTest is Test {
         );
         assertTrue(success);
 
-        bytes32 gameId = bingoGameContract.createGame();
+        bingoGameContract.createGame();
 
         vm.stopPrank();
     }
@@ -115,16 +115,16 @@ contract BitmaskBingoTest is Test {
         assertTrue(success);
 
         // games cannot share an ID, so TX must be in different blocks
-        bytes32 gameIdOne = bingoGameContract.createGame();
+        bingoGameContract.createGame();
         vm.roll(block.number + 1);
 
-        bytes32 gameIdTwo = bingoGameContract.createGame();
+        bingoGameContract.createGame();
         vm.roll(block.number + 1);
 
-        bytes32 gameIdThree = bingoGameContract.createGame();
+        bingoGameContract.createGame();
         vm.roll(block.number + 1);
 
-        bytes32 gameIdFour = bingoGameContract.createGame();
+        bingoGameContract.createGame();
         vm.roll(block.number + 1);
 
         vm.stopPrank();
@@ -174,7 +174,6 @@ contract BitmaskBingoTest is Test {
         vm.warp(block.timestamp + 2 hours);
         // get the game ID created by the other player
         bytes32 gameIdToJoin = playerToCreatedGameIds[playerOne];
-        emit log_named_bytes32("game id to join: ", gameIdToJoin);
 
         vm.startPrank(playerThree);
 
@@ -224,15 +223,12 @@ contract BitmaskBingoTest is Test {
             vm.prank(playerToDraw);
             bingoGameContract.drawNumber(id);
             uint256 latest = bingoGameContract.getLastDrawnNumberForGame(id);
-            emit log_named_uint("latset: ", latest);
 
             // player one
             vm.startPrank(playerOne);
 
             bool shouldClaimOne = playerHasNumber(playerOneCardNumbers, latest);
             if (shouldClaimOne) {
-                emit log_named_uint("uint to claim: ", latest);
-                emit log_string("ITS CLAIM TIME");
                 bingoGameContract.markNumberOnCard(id);
                 hasWinner = bingoGameContract.checkForWinner(playerOne, id);
 
@@ -250,8 +246,6 @@ contract BitmaskBingoTest is Test {
 
             bool shouldClaimTwo = playerHasNumber(playerTwoCardNumbers, latest);
             if (shouldClaimTwo) {
-                emit log_named_uint("uint to claim: ", latest);
-                emit log_string("ITS CLAIM TIME");
                 bingoGameContract.markNumberOnCard(id);
                 hasWinner = bingoGameContract.checkForWinner(playerTwo, id);
                 if (hasWinner) {
@@ -275,6 +269,7 @@ contract BitmaskBingoTest is Test {
 
         uint256 winnerBalanceBeforeClaiming = token.balanceOf(winner);
         bool success = bingoGameContract.claimPrize(id);
+        assertTrue(success);
         uint256 winnerBalanceAfterClaiming = token.balanceOf(winner);
         (, , uint256 gamePrizeAfter, ) = bingoGameContract.getGameById(id);
         assertEq(

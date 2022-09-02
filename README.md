@@ -10,17 +10,21 @@ Foundry will print out logs (emitted events) from the tests and present a gas re
 
 `forge test -vv --gas-report`
 
+Game simulations are tested in `./test/BitmaskBingo.t.sol`, whereas pure game logic is tested in `./test/GameLogic.t.sol`.
+
 ## Requirements
 
--   [] Support multiple players in a game
--   [] Support multiple concurrent games
--   [] Each player pays an ERC20 entry fee, transferred on join
--   [] Winner wins the pot of entry fees, transferred on win
--   [] Games have a minimum join duration before start
--   [] Games have a minimum turn duration between draws
--   [] Admin can update the entry fee, join duration, and turn duration
--   [] Interface exposing a public API (including getters and events) for a dApp to render current **and** historial game state
--   [] summary of worst-case gas costs
+-   [x] Support multiple players in a game
+-   [x] Support multiple concurrent games
+-   [x] Each player pays an ERC20 entry fee, transferred on join
+-   [x] Winner wins the pot of entry fees, transferred on win
+-   [x] Games have a minimum join duration before start
+-   [x] Games have a minimum turn duration between draws
+-   [x] Admin can update the entry fee, join duration, and turn duration
+-   [x] Interface exposing a public API (including getters and events) for a dApp to render current **and** historial game state
+-   [x] summary of worst-case gas costs
+
+## Design
 
 ### Optimizing storage using bitwise operations
 
@@ -68,4 +72,81 @@ represented in binary as:
 which gives a decimal value of:
 uint32 column = 1082401;
 
+```
+
+## Storage Layout
+
+Install `sol2uml`:
+
+```
+npm install -g sol2uml
+```
+
+Then run:
+
+```
+sol2uml storage ./src -c BitmaskBingo -o ./images/gasStorage.svg
+```
+
+Result:
+
+<!-- ![storage-layout](./images/gasStorage.svg) -->
+
+## Gas Report
+
+As is evident from the gas report below (run the `forge test` CLI command with the `--gas-report` flag to get an up-to-date version ), the heaviest gas usage comes from `createGame`, `joinGame` and `claimPrize`. A non-trivial portion of the gas usage comes from the approval and transfer of the `ERC20` token and cannot be avoided, unless done outside of the and some sort of proof + balance check is implemented, but that's beyond the scope of this exercise. The heavy gas usage in `createGame` comes from the creation of the `Game` object, though some optimization has been achieved by utilizing struct packing to reduce the number of slots.
+
+In the design of this system, the burden of heavier gas usage is on the creator of a game instance. Worst case scenario occurs when the creator of the game is also the player to draw a card for most (or every round) in order to keep the game progressing. The next iteration of the contract should take this into consideration, and perhaps have each joining player alternate the responsibility of drawing cards for each round.
+
+By utilizing bitmaps and bitwise operations to handle storage of data, we've minimized what might've been a heavy cost of looping throw storage arrays and storing multiple separate values.
+
+```
+╭────────────────────────────────────────┬─────────────────┬───────┬────────┬───────┬─────────╮
+│ src/BingoToken.sol:BingoToken contract ┆                 ┆       ┆        ┆       ┆         │
+╞════════════════════════════════════════╪═════════════════╪═══════╪════════╪═══════╪═════════╡
+│ Deployment Cost                        ┆ Deployment Size ┆       ┆        ┆       ┆         │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ 667346                                 ┆ 3608            ┆       ┆        ┆       ┆         │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ Function Name                          ┆ min             ┆ avg   ┆ median ┆ max   ┆ # calls │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ approve                                ┆ 24669           ┆ 24669 ┆ 24669  ┆ 24669 ┆ 9       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ balanceOf                              ┆ 552             ┆ 1218  ┆ 552    ┆ 2552  ┆ 6       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ mint                                   ┆ 25453           ┆ 47353 ┆ 47353  ┆ 69253 ┆ 16      │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ transferFrom                           ┆ 4623            ┆ 17925 ┆ 25983  ┆ 25983 ┆ 7       │
+╰────────────────────────────────────────┴─────────────────┴───────┴────────┴───────┴─────────╯
+╭────────────────────────────────────────────┬─────────────────┬────────┬────────┬────────┬─────────╮
+│ src/BitmaskBingo.sol:BitmaskBingo contract ┆                 ┆        ┆        ┆        ┆         │
+╞════════════════════════════════════════════╪═════════════════╪════════╪════════╪════════╪═════════╡
+│ Deployment Cost                            ┆ Deployment Size ┆        ┆        ┆        ┆         │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ 1556707                                    ┆ 7766            ┆        ┆        ┆        ┆         │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ Function Name                              ┆ min             ┆ avg    ┆ median ┆ max    ┆ # calls │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ checkForWinner                             ┆ 5526            ┆ 7381   ┆ 7299   ┆ 11299  ┆ 27      │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ claimPrize                                 ┆ 34996           ┆ 34996  ┆ 34996  ┆ 34996  ┆ 1       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ createGame                                 ┆ 105053          ┆ 105053 ┆ 105053 ┆ 105053 ┆ 4       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ drawNumber                                 ┆ 4885            ┆ 4885   ┆ 4885   ┆ 4885   ┆ 94      │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ getGameById                                ┆ 902             ┆ 902    ┆ 902    ┆ 902    ┆ 2       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ getGameSettings                            ┆ 4573            ┆ 4573   ┆ 4573   ┆ 4573   ┆ 1       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ getLastDrawnNumberForGame                  ┆ 522             ┆ 522    ┆ 522    ┆ 522    ┆ 93      │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ getPlayerCardNumbersForGame                ┆ 13506           ┆ 13506  ┆ 13506  ┆ 13506  ┆ 2       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ joinGame                                   ┆ 2768            ┆ 31081  ┆ 31081  ┆ 59395  ┆ 4       │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ markNumberOnCard                           ┆ 15309           ┆ 17682  ┆ 17662  ┆ 19653  ┆ 27      │
+├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌┼╌╌╌╌╌╌╌╌╌┤
+│ updateEntryFee                             ┆ 5309            ┆ 5309   ┆ 5309   ┆ 5309   ┆ 1       │
+╰────────────────────────────────────────────┴─────────────────┴────────┴────────┴────────┴─────────╯
 ```
