@@ -90,6 +90,6 @@ library StorageUtils {
         pure
         returns (uint256)
     {
-        return _hitStorage & (uint32(1) << _index) > 0 ? 1 : 0;
+        return _hitStorage & (uint32(1) << _index) != 0 ? 1 : 0;
     }
 }
