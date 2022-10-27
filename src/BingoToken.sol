@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract BingoToken is ERC20, Ownable {
-    uint256 public constant maxSupply = type(uint64).max;
+    uint256 private constant maxSupply = type(uint64).max;
     uint256 public supply;
 
     error SupplyExceeded(uint256 requested, uint256 max);
