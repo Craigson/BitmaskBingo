@@ -115,13 +115,19 @@ abstract contract GameMechanics {
         pure
         returns (bool)
     {
-        uint256 len = _gamePlayers.length;
-        for (uint256 i; i < len; ++i) {
-            if (_player == _gamePlayers[i]) {
-                return true;
+        assembly {
+            let player := _player
+            let gamePlayers := _gamePlayers
+            let len := mload(gamePlayers)
+            let i := 0
+            for { } lt(i, len) { i := add(i, 1) } {
+                let playerAddress := mload(add(gamePlayers, mul(add(i, 1), 32)))
+                if eq(playerAddress, player) {
+                    return(1, 0)
+                }
             }
+            return(0, 0)
         }
-        return false;
     }
 
     function playerHasNumber(uint256[] memory _playerNumbers, uint256 _target)
@@ -129,14 +135,19 @@ abstract contract GameMechanics {
         pure
         returns (bool, uint32)
     {
-        uint256 len = _playerNumbers.length;
-        for (uint256 i; i < len; ++i) {
-            if (_playerNumbers[i] == _target) {
-                return (true, uint32(i));
+        assembly {
+            let playerNumbers := _playerNumbers
+            let target := _target
+            let len := mload(playerNumbers)
+            let i := 0
+            for { } lt(i, len) { i := add(i, 1) } {
+                let playerNumber := mload(add(playerNumbers, mul(add(i, 1), 32)))
+                if eq(playerNumber, target) {
+                    return(1, i)
+                }
             }
+            return(0, 0)
         }
-
-        return (false, uint32(99));
     }
 
     /**
@@ -189,12 +200,14 @@ abstract contract GameMechanics {
         pure
         returns (bool)
     {
-        uint256 len = _playerIds.length;
-        for (uint256 i; i < len; ++i) {
-            if (_playerIds[i] == _target) return true;
+        assembly { 
+            let len := mload(_playerIds)
+            for { let i := 0 } lt(i, len) { i := add(i, 1) } {
+                if eq(mload(add(_playerIds, mul(add(i, 1), 32))), _target) {
+                    return(1, 0)
+                }
+            }
         }
-
-        return false;
     }
 
     // note: if the bitwise AND ( & ) between the players grid and the mask
@@ -205,11 +218,17 @@ abstract contract GameMechanics {
         pure
         returns (bool)
     {   
-        uint256 len = _hitMasks.length;
-        for (uint256 i; i < len; ++i) {
-            uint32 result = _playerHits & _hitMasks[i];
-            if (result == _hitMasks[i]) return true;
+        assembly {
+            let len := mload(_hitMasks)
+            let mask := add(_hitMasks, 0x20)
+            let end := add(mask, mul(len, 0x20))
+            for { } lt(mask, end) { mask := add(mask, 0x20) } {
+                if eq(and(mload(mask), _playerHits), mload(mask)) {
+                    return(1, 0)
+                }
+            }
         }
-        return false;
     }
+
+    
 }
