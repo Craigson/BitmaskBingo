@@ -2,7 +2,6 @@
 pragma solidity 0.8.15;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 import "./interfaces/IBitmaskBingo.sol";
 import "./GameMechanics.sol";
 
@@ -22,10 +21,16 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
     mapping(bytes32 => Game) gameRegistry;
     mapping(address => mapping(bytes32 => BingoCard)) playerRegistry;
 
-    // TODO: delete these
-    event LogUint256(uint256 val);
-    event LogUint32(uint32 val);
-    event LogString(string str);
+    // erros
+    error GameDoesExist();
+    error DuplicateGameId();
+    error GameAlreadyStarted();
+    error PlayerStillJoining(); // drawNumber: player are still joining
+    error TurnDurationPending(); // drawNumber: turn duration pending
+    error NotHaveNumber(); 
+    error GameHasEnded();
+    error PlayerIsNotAMember();
+    error GameDoesNotExist();
 
     constructor(address _token) {
         owner = msg.sender;
@@ -37,14 +42,13 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
     function createGame() external returns (bytes32 gameId) {
         GlobalGameSettings memory settings = gameSettings;
         uint256 joinFee = settings.entryFee;
-        emit LogUint256(joinFee);
 
         // this will revert if balances are not sufficient
         IERC20(bingoToken).transferFrom(msg.sender, address(this), joinFee);
 
         // generate a uuid for the game and check that it doesn't already exist so we cannot overwrite
         gameId = keccak256(abi.encode(blockhash(block.number - 1), msg.sender));
-        require(gameRegistry[gameId].createdAt == 0, "Duplicate Game ID");
+        if(gameRegistry[gameId].createdAt == 0){ revert DuplicateGameId();}
 
         // create the game
         Game memory newGame = Game({
@@ -76,23 +80,19 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         );
     }
 
+    
     /**
      * @dev  No need to check the player's token balance or allowance,
      *       `transferFrom` will revert if either are insufficient.
      */
     function joinGame(bytes32 _gameId) external {
         Game memory gameJoined = gameRegistry[_gameId];
-
         // game exists
-        require(gameJoined.createdAt > 0, "joinGame: Game does not exist");
+        if(gameJoined.createdAt != 0){revert GameDoesExist();}
 
         GlobalGameSettings memory settings = gameSettings;
         // player can't rejoin the game to reset their card once the game has started
-        require(
-            block.timestamp <
-                gameJoined.createdAt + settings.minimumJoinDuration,
-            "joinGame: Game already started"
-        );
+        if(block.timestamp < gameJoined.createdAt + settings.minimumJoinDuration){revert GameAlreadyStarted();}
 
         uint256 joinFee = gameSettings.entryFee;
         IERC20(bingoToken).transferFrom(msg.sender, address(this), joinFee);
@@ -119,14 +119,8 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
     function drawNumber(bytes32 _gameId) external onlyPlayer(_gameId) {
         Game memory game = gameRegistry[_gameId];
         GlobalGameSettings memory settings = gameSettings;
-        require(
-            block.timestamp > game.createdAt + settings.minimumJoinDuration,
-            "drawNumber: player are still joining"
-        );
-        require(
-            block.timestamp > game.lastDrawnAt + settings.minimumTurnDuration,
-            "drawNumber: turn duration pending"
-        );
+        if(block.timestamp < game.lastDrawnAt + settings.minimumTurnDuration){revert PlayerStillJoining();}
+        if(block.timestamp < game.lastDrawnAt + settings.minimumTurnDuration){revert TurnDurationPending();}
 
         uint256 random = uint256(
             keccak256(abi.encode(blockhash(block.number - 1)))
@@ -154,7 +148,7 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             numbers,
             lastDrawnNumber
         );
-        require(hasNumber, "Player's card does not have last drawn number");
+        if(hasNumber){revert NotHaveNumber();}
         uint32 playerCardHits = playerCard.hitStorage;
 
         // update the hit bitmap
@@ -175,12 +169,11 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         onlyPlayer(_gameId)
         returns (bool success)
     {
-        // confirm winner
         BingoCard memory playerCard = playerRegistry[msg.sender][_gameId];
         uint32 playerHits = playerCard.hitStorage;
         uint32[12] memory bingoHitMasks = winningBingoMasks;
         bool isWinner = checkForBingo(bingoHitMasks, playerHits);
-        require(isWinner, "Player is not a winner");
+        if(!isWinner){revert PlayerIsNotAMember();}
 
         // mark as game completed
         Game memory game = gameRegistry[_gameId];
@@ -227,7 +220,9 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         )
     {
         Game memory game = gameRegistry[_gameId];
-        require(game.createdAt > 0, "Game does not exist");
+        if (game.createdAt != 0) {
+            revert GameDoesExist();
+        }
         lastDrawn = game.lastDrawnNumber;
         lastDrawnAt = game.lastDrawnAt;
         prizepool = game.prizePool;
@@ -240,15 +235,16 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         view
         returns (uint256[] memory)
     {
-        BingoCard memory playerCard = playerRegistry[_player][_gameId];
-        uint256[] memory boardnumberStorage = new uint256[](25);
-        for (uint256 i; i < 25; ++i) {
-            boardnumberStorage[i] = StorageUtils.getBucketValueByIndex(
-                playerCard.numberStorage,
-                i
-            );
+        assembly {
+            let playerCard := sload(
+                add(
+                    keccak256(0x40, 0x20),
+                    keccak256(_player, _gameId)
+                )
+            )
+            let numbers := sload(playerCard)
+            return(numbers, 0x20)
         }
-        return boardnumberStorage;
     }
 
     // TODO: maybe return which line is the winner
@@ -307,7 +303,7 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         returns (bool isPlayer)
     {
         BingoCard memory playerCard = playerRegistry[_player][_gameId];
-        isPlayer = playerCard.hitStorage > 0;
+        isPlayer = playerCard.hitStorage != 0;
     }
 
     // ================================ A D M I N  F U N C T I O N S
@@ -330,8 +326,8 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
 
     // ================================ M O D I F I E R S
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "!owner");
+    modifier onlyOwner {
+        require(msg.sender == owner);
         _;
     }
 
@@ -341,12 +337,12 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
      */
     modifier onlyPlayer(bytes32 _gameId) {
         Game memory game = gameRegistry[_gameId];
-        require(game.createdAt > 0, "Game does not exist");
-        require(game.lastDrawnNumber != 1000, "Game is over"); // TODO: test this
+        if(game.createdAt != 0){revert GameDoesNotExist();}
+        if(game.lastDrawnNumber == 1000){revert GameHasEnded();} // TODO: test this
 
         BingoCard memory playerCard = playerRegistry[msg.sender][_gameId];
-        bool playerIsMember = playerCard.numberStorage > 0;
-        require(playerIsMember, "Not a member of this game");
+        bool playerIsMember = playerCard.numberStorage != 0;
+        if (!playerIsMember) {revert PlayerIsNotAMember();}
         _;
     }
 }

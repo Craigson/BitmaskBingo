@@ -15,6 +15,7 @@ abstract contract GameMechanics {
         uint256 entryFee;
         uint256 minimumTurnDuration;
         uint256 minimumJoinDuration;
+        
     }
 
     struct BingoCard {
@@ -84,6 +85,7 @@ abstract contract GameMechanics {
         17043521, // d0: 00000001000001000001000001000001
         1118480 // d1: 00000000000100010001000100010000
     ];
+    
 
     /**
      *   @dev   Pure function doesn't read from, or write to, storage, making it
@@ -96,7 +98,8 @@ abstract contract GameMechanics {
         returns (uint256)
     {
         uint256 updatedCard = _card;
-        for (uint256 i; i < 25; ++i) {
+        uint256 len = 25;
+        for (uint256 i; i < len; ++i) {
             uint256 rand = uint256(keccak256(abi.encode(_entropy, i))) % 255;
             updatedCard = StorageUtils.setBucketValueByIndex(
                 updatedCard,
@@ -112,12 +115,19 @@ abstract contract GameMechanics {
         pure
         returns (bool)
     {
-        for (uint256 i; i < _gamePlayers.length; ++i) {
-            if (_player == _gamePlayers[i]) {
-                return true;
+        assembly {
+            let player := _player
+            let gamePlayers := _gamePlayers
+            let len := mload(gamePlayers)
+            let i := 0
+            for { } lt(i, len) { i := add(i, 1) } {
+                let playerAddress := mload(add(gamePlayers, mul(add(i, 1), 32)))
+                if eq(playerAddress, player) {
+                    return(1, 0)
+                }
             }
+            return(0, 0)
         }
-        return false;
     }
 
     function playerHasNumber(uint256[] memory _playerNumbers, uint256 _target)
@@ -125,7 +135,8 @@ abstract contract GameMechanics {
         pure
         returns (bool, uint32)
     {
-        for (uint256 i; i < _playerNumbers.length; ++i) {
+        uint256 len = _playerNumbers.length;
+        for (uint256 i; i < len; ++i) {
             if (_playerNumbers[i] == _target) {
                 return (true, uint32(i));
             }
@@ -148,7 +159,8 @@ abstract contract GameMechanics {
         returns (uint256[] memory)
     {
         uint256[] memory cardNumbers = new uint256[](25);
-        for (uint256 i; i < 25; ++i) {
+        uint256 len = 25;
+        for (uint256 i; i < len; ++i) {
             cardNumbers[i] = StorageUtils.getBucketValueByIndex(_card, i);
         }
         return cardNumbers;
@@ -170,11 +182,19 @@ abstract contract GameMechanics {
         pure
         returns (uint256[] memory)
     {
-        uint256[] memory cardHits = new uint256[](25);
-        for (uint32 i; i < 25; ++i) {
-            cardHits[i] = StorageUtils.getBitValueByIndex(_hits, i);
+        assembly {
+            let hits := _hits
+            let hitsArray := mload(0x40)
+            mstore(hitsArray, 25)
+            let len := 25
+            let i := 0
+            for { } lt(i, len) { i := add(i, 1) } {
+                let bit := and(hits, 1)
+                mstore(add(hitsArray, mul(add(i, 1), 32)), bit)
+                hits := div(hits, 2)
+            }
+            return (hitsArray, 0)
         }
-        return cardHits;
     }
 
     function checkCardForHit(uint256[] memory _playerIds, uint256 _target)
@@ -182,11 +202,15 @@ abstract contract GameMechanics {
         pure
         returns (bool)
     {
-        for (uint256 i; i < _playerIds.length; ++i) {
-            if (_playerIds[i] == _target) return true;
+        assembly { 
+            let len := mload(_playerIds)
+            for { let i := 0 } lt(i, len) { i := add(i, 1) } {
+                if eq(mload(add(_playerIds, mul(add(i, 1), 32))), _target) {
+                    return(1, 0)
+                }
+            }
+            return(0, 0)
         }
-
-        return false;
     }
 
     // note: if the bitwise AND ( & ) between the players grid and the mask
@@ -196,11 +220,18 @@ abstract contract GameMechanics {
         internal
         pure
         returns (bool)
-    {
-        for (uint256 i; i < _hitMasks.length; ++i) {
-            uint32 result = _playerHits & _hitMasks[i];
-            if (result == _hitMasks[i]) return true;
+    {   
+        assembly {
+            let len := mload(_hitMasks)
+            let mask := add(_hitMasks, 0x20)
+            let end := add(mask, mul(len, 0x20))
+            for { } lt(mask, end) { mask := add(mask, 0x20) } {
+                if eq(and(mload(mask), _playerHits), mload(mask)) {
+                    return(1, 0)
+                }
+            }
         }
-        return false;
     }
+
+    
 }
