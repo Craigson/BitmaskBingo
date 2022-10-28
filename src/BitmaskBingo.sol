@@ -27,15 +27,10 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
     error GameAlreadyStarted();
     error PlayerStillJoining(); // drawNumber: player are still joining
     error TurnDurationPending(); // drawNumber: turn duration pending
-    error PlayerDoesNotHaveNumber(); // "Player's card does not have last drawn number"
+    error NotHaveNumber(); 
     error GameHasEnded();
     error PlayerIsNotAMember();
     error GameDoesNotExist();
-
-    // TODO: delete these
-    event LogUint256(uint256 val);
-    event LogUint32(uint32 val);
-    event LogString(string str);
 
     constructor(address _token) {
         owner = msg.sender;
@@ -47,7 +42,6 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
     function createGame() external returns (bytes32 gameId) {
         GlobalGameSettings memory settings = gameSettings;
         uint256 joinFee = settings.entryFee;
-        emit LogUint256(joinFee);
 
         // this will revert if balances are not sufficient
         IERC20(bingoToken).transferFrom(msg.sender, address(this), joinFee);
@@ -155,7 +149,7 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
             numbers,
             lastDrawnNumber
         );
-        if(!hasNumber){revert PlayerDoesNotHaveNumber();}
+        if(hasNumber){revert NotHaveNumber();}
         uint32 playerCardHits = playerCard.hitStorage;
 
         // update the hit bitmap
@@ -245,7 +239,8 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
     {
         BingoCard memory playerCard = playerRegistry[_player][_gameId];
         uint256[] memory boardnumberStorage = new uint256[](25);
-        for (uint256 i; i < 25; ++i) {
+        uint256 len = 25;
+        for (uint256 i; i < len; ++i) {
             boardnumberStorage[i] = StorageUtils.getBucketValueByIndex(
                 playerCard.numberStorage,
                 i

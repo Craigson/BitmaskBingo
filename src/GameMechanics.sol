@@ -15,6 +15,7 @@ abstract contract GameMechanics {
         uint256 entryFee;
         uint256 minimumTurnDuration;
         uint256 minimumJoinDuration;
+        
     }
 
     struct BingoCard {
@@ -84,6 +85,7 @@ abstract contract GameMechanics {
         17043521, // d0: 00000001000001000001000001000001
         1118480 // d1: 00000000000100010001000100010000
     ];
+    
 
     /**
      *   @dev   Pure function doesn't read from, or write to, storage, making it
@@ -96,7 +98,8 @@ abstract contract GameMechanics {
         returns (uint256)
     {
         uint256 updatedCard = _card;
-        for (uint256 i; i < 25; ++i) {
+        uint256 len = 25;
+        for (uint256 i; i < len; ++i) {
             uint256 rand = uint256(keccak256(abi.encode(_entropy, i))) % 255;
             updatedCard = StorageUtils.setBucketValueByIndex(
                 updatedCard,
@@ -112,7 +115,8 @@ abstract contract GameMechanics {
         pure
         returns (bool)
     {
-        for (uint256 i; i < _gamePlayers.length; ++i) {
+        uint256 len = _gamePlayers.length;
+        for (uint256 i; i < len; ++i) {
             if (_player == _gamePlayers[i]) {
                 return true;
             }
@@ -125,7 +129,8 @@ abstract contract GameMechanics {
         pure
         returns (bool, uint32)
     {
-        for (uint256 i; i < _playerNumbers.length; ++i) {
+        uint256 len = _playerNumbers.length;
+        for (uint256 i; i < len; ++i) {
             if (_playerNumbers[i] == _target) {
                 return (true, uint32(i));
             }
@@ -148,7 +153,8 @@ abstract contract GameMechanics {
         returns (uint256[] memory)
     {
         uint256[] memory cardNumbers = new uint256[](25);
-        for (uint256 i; i < 25; ++i) {
+        uint256 len = 25;
+        for (uint256 i; i < len; ++i) {
             cardNumbers[i] = StorageUtils.getBucketValueByIndex(_card, i);
         }
         return cardNumbers;
@@ -171,7 +177,8 @@ abstract contract GameMechanics {
         returns (uint256[] memory)
     {
         uint256[] memory cardHits = new uint256[](25);
-        for (uint32 i; i < 25; ++i) {
+        uint256 len = 25;
+        for (uint32 i; i < len; ++i) {
             cardHits[i] = StorageUtils.getBitValueByIndex(_hits, i);
         }
         return cardHits;
@@ -182,7 +189,8 @@ abstract contract GameMechanics {
         pure
         returns (bool)
     {
-        for (uint256 i; i < _playerIds.length; ++i) {
+        uint256 len = _playerIds.length;
+        for (uint256 i; i < len; ++i) {
             if (_playerIds[i] == _target) return true;
         }
 
@@ -196,8 +204,9 @@ abstract contract GameMechanics {
         internal
         pure
         returns (bool)
-    {
-        for (uint256 i; i < _hitMasks.length; ++i) {
+    {   
+        uint256 len = _hitMasks.length;
+        for (uint256 i; i < len; ++i) {
             uint32 result = _playerHits & _hitMasks[i];
             if (result == _hitMasks[i]) return true;
         }

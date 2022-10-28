@@ -11,7 +11,7 @@ contract BingoToken is ERC20, Ownable {
     error SupplyExceeded(uint256 requested, uint256 max);
     constructor() ERC20("BingoToken", "BTK") {}
 
-    function mint(address to, uint256 amount) public onlyOwner {
+    function mint(address to, uint256 amount) external onlyOwner {
         if(supply + amount > maxSupply) {
             revert SupplyExceeded(supply + amount, maxSupply);
         }
