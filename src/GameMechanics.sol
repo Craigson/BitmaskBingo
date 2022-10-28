@@ -135,19 +135,14 @@ abstract contract GameMechanics {
         pure
         returns (bool, uint32)
     {
-        assembly {
-            let playerNumbers := _playerNumbers
-            let target := _target
-            let len := mload(playerNumbers)
-            let i := 0
-            for { } lt(i, len) { i := add(i, 1) } {
-                let playerNumber := mload(add(playerNumbers, mul(add(i, 1), 32)))
-                if eq(playerNumber, target) {
-                    return(1, i)
-                }
+        uint256 len = _playerNumbers.length;
+        for (uint256 i; i < len; ++i) {
+            if (_playerNumbers[i] == _target) {
+                return (true, uint32(i));
             }
-            return(0, 0)
         }
+
+        return (false, uint32(99));
     }
 
     /**
@@ -187,12 +182,19 @@ abstract contract GameMechanics {
         pure
         returns (uint256[] memory)
     {
-        uint256[] memory cardHits = new uint256[](25);
-        uint256 len = 25;
-        for (uint32 i; i < len; ++i) {
-            cardHits[i] = StorageUtils.getBitValueByIndex(_hits, i);
+        assembly {
+            let hits := _hits
+            let hitsArray := mload(0x40)
+            mstore(hitsArray, 25)
+            let len := 25
+            let i := 0
+            for { } lt(i, len) { i := add(i, 1) } {
+                let bit := and(hits, 1)
+                mstore(add(hitsArray, mul(add(i, 1), 32)), bit)
+                hits := div(hits, 2)
+            }
+            return (hitsArray, 0)
         }
-        return cardHits;
     }
 
     function checkCardForHit(uint256[] memory _playerIds, uint256 _target)
@@ -207,6 +209,7 @@ abstract contract GameMechanics {
                     return(1, 0)
                 }
             }
+            return(0, 0)
         }
     }
 

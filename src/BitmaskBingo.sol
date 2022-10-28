@@ -87,7 +87,6 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
      */
     function joinGame(bytes32 _gameId) external {
         Game memory gameJoined = gameRegistry[_gameId];
-
         // game exists
         if(gameJoined.createdAt != 0){revert GameDoesExist();}
 
@@ -170,7 +169,6 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         onlyPlayer(_gameId)
         returns (bool success)
     {
-        // confirm winner
         BingoCard memory playerCard = playerRegistry[msg.sender][_gameId];
         uint32 playerHits = playerCard.hitStorage;
         uint32[12] memory bingoHitMasks = winningBingoMasks;
@@ -237,16 +235,16 @@ contract BitmaskBingo is GameMechanics, IBitmaskBingo {
         view
         returns (uint256[] memory)
     {
-        BingoCard memory playerCard = playerRegistry[_player][_gameId];
-        uint256[] memory boardnumberStorage = new uint256[](25);
-        uint256 len = 25;
-        for (uint256 i; i < len; ++i) {
-            boardnumberStorage[i] = StorageUtils.getBucketValueByIndex(
-                playerCard.numberStorage,
-                i
-            );
+        assembly {
+            let playerCard := sload(
+                add(
+                    keccak256(0x40, 0x20),
+                    keccak256(_player, _gameId)
+                )
+            )
+            let numbers := sload(playerCard)
+            return(numbers, 0x20)
         }
-        return boardnumberStorage;
     }
 
     // TODO: maybe return which line is the winner
